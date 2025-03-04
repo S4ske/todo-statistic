@@ -57,28 +57,21 @@ function checkRe(str) {
 }
 
 function calculateColumnWidths(todos) {
-  let maxImportance = 1;
-  let maxUser = 0;
-  let maxDate = 0;
-  let maxComment = 0;
+  let maxUser = "user".length;
+  let maxDate = "date".length;
+  let maxComment = "comment".length;
 
   for (const todo of todos) {
     const parsedTodo = checkRe(todo);
     if (parsedTodo) {
-      const importance = todo.includes("!") ? 1 : 0;
-      const userLength = parsedTodo.author.length;
-      const dateLength = parsedTodo.date.length;
-      const commentLength = parsedTodo.comment.length;
-
-      if (userLength > maxUser) maxUser = userLength;
-      if (dateLength > maxDate) maxDate = dateLength;
-      if (commentLength > maxComment) maxComment = commentLength;
+      maxUser = Math.max(maxUser, parsedTodo.author.length);
+      maxDate = Math.max(maxDate, parsedTodo.date.length);
+      maxComment = Math.max(maxComment, parsedTodo.comment.length);
     }
   }
 
-
   return {
-    importance: Math.min(maxImportance, 1),
+    importance: 1,
     user: Math.min(maxUser, 10),
     date: Math.min(maxDate, 10),
     comment: Math.min(maxComment, 50),
@@ -89,26 +82,52 @@ function formatTableRow(importance, user, date, comment, widths) {
   const importanceFormatted = importance.padEnd(widths.importance).slice(0, widths.importance);
   const userFormatted = user.slice(0, widths.user).padEnd(widths.user);
   const dateFormatted = date.slice(0, widths.date).padEnd(widths.date);
-  const commentFormatted = comment.slice(0, widths.comment).padEnd(widths.comment);
+  let commentFormatted = comment.slice(0, widths.comment);
+  
+  if (comment.length > widths.comment) {
+    commentFormatted = commentFormatted.slice(0, widths.comment - 3) + "...";
+  }
+  commentFormatted = commentFormatted.padEnd(widths.comment);
+  
+  return `  ${importanceFormatted}  |  ${userFormatted}  |  ${dateFormatted}  |  ${commentFormatted}`;
+}
 
-  const commentDisplay = comment.length > widths.comment ? commentFormatted.slice(0, widths.comment - 3) + "..." : commentFormatted;
+function getHeader(widths) {
+  return formatTableRow("!", "user", "date", "comment", widths);
+}
 
-  return `  ${importanceFormatted}  |  ${userFormatted}  |  ${dateFormatted}  |  ${commentDisplay}`;
+function getSeparator(widths) {
+  const totalLength = 
+    2 + widths.importance + 2 + 3 + 
+    2 + widths.user + 2 + 3 +
+    2 + widths.date + 2 + 3 +
+    2 + widths.comment + 2;
+  return "-".repeat(totalLength);
 }
 
 
 function printTodos(todos) {
+  if (todos.length === 0) return;
   const widths = calculateColumnWidths(todos);
+  
+  console.log(getHeader(widths));
+  console.log(getSeparator(widths));
+  
   for (const todo of todos) {
     const parsedTodo = checkRe(todo);
     if (parsedTodo) {
-      const importance = todo.includes("!") ? "!" : " ";
-      const user = parsedTodo.author;
-      const date = parsedTodo.date;
-      const comment = parsedTodo.comment;
-      console.log(formatTableRow(importance, user, date, comment, widths));
+      const importance = parsedTodo.raw.includes("!") ? "!" : " ";
+      console.log(formatTableRow(
+        importance,
+        parsedTodo.author,
+        parsedTodo.date,
+        parsedTodo.comment,
+        widths
+      ));
     }
   }
+  
+  console.log(getSeparator(widths));
 }
 
 function processCommand(command) {
