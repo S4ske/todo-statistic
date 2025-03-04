@@ -1,183 +1,368 @@
 const { getAllFilePathsWithExtension, readFile } = require("./fileSystem");
 const { readLine } = require("./console");
-
-const files = getFiles();
+const path = require("path");
 
 console.log("Please, write your command!");
 readLine(processCommand);
 
 function getFiles() {
   const filePaths = getAllFilePathsWithExtension(process.cwd(), "js");
-  return filePaths.map((path) => readFile(path));
+  return filePaths.map((filePath) => ({
+    filename: path.basename(filePath),
+    content: readFile(filePath),
+  }));
 }
 
 function isGood(str) {
   const splitedStr = str.split("TODO")[0];
   if (
-    splitedStr.split("").filter((x) => x == "'").length % 2 == 0 &&
-    splitedStr.split("").filter((x) => x == '"').length % 2 == 0 &&
-    splitedStr.split("").filter((x) => x == "`").length % 2 == 0
+    splitedStr.split("").filter((x) => x === "'").length % 2 === 0 &&
+    splitedStr.split("").filter((x) => x === '"').length % 2 === 0 &&
+    splitedStr.split("").filter((x) => x === "`").length % 2 === 0
   ) {
     return true;
   }
-
   return false;
 }
 
 function getTodos() {
-  const files = getFiles();
+  const filesData = getFiles();
   const todos = [];
-  for (const file of files) {
-    let lines = file.split("\n");
+  for (const fileData of filesData) {
+    const { filename, content } = fileData;
+    const lines = content.split("\n");
     for (const line of lines) {
       if (line.includes("// TODO") && isGood(line)) {
-        todos.push(`//${line.split("//")[1]}`);
+        todos.push({
+          raw: `//${line.split("//")[1]}`,
+          fileName: filename,
+        });
       }
     }
   }
-
   return todos;
 }
 
-function checkRe(str) {
-  const regex = /\/\/ TODO\s+([^;]+);\s+([^;]+);\s+(.+)/;
-
+function checkRe(todoObj) {
+  if (!todoObj || !todoObj.raw) return false;
+  const str = todoObj.raw;
+  const regex = /\/\/ TODO\s+([^;]+);\s*([^;]+);\s*(.+)/;
   const match = str.match(regex);
-  
+
   if (match) {
     const author = match[1].trim();
     const date = match[2].trim();
     const comment = match[3].trim();
-    return { author: author, date: date, comment: comment, raw: str }
-  }
-  else {
+    return {
+      author,
+      date,
+      comment,
+      raw: str,
+      file: todoObj.fileName,
+    };
+  } else {
     return false;
   }
-  
 }
 
 function calculateColumnWidths(todos) {
+  let maxImportance = 1;
   let maxUser = "user".length;
   let maxDate = "date".length;
+  let maxFile = "file".length;
   let maxComment = "comment".length;
 
-  for (const todo of todos) {
-    const parsedTodo = checkRe(todo);
-    if (parsedTodo) {
-      maxUser = Math.max(maxUser, parsedTodo.author.length);
-      maxDate = Math.max(maxDate, parsedTodo.date.length);
-      maxComment = Math.max(maxComment, parsedTodo.comment.length);
+  for (const t of todos) {
+    if (t.author !== undefined) {
+      maxUser = Math.max(maxUser, t.author.length);
+      maxDate = Math.max(maxDate, t.date.length);
+      maxComment = Math.max(maxComment, t.comment.length);
+      maxFile = Math.max(maxFile, t.file ? t.file.length : 0);
+    } else {
+      const rawText = t.raw || "";
+      maxComment = Math.max(
+        maxComment,
+        rawText.replace("// TODO", "").trim().length
+      );
+      maxFile = Math.max(maxFile, t.fileName ? t.fileName.length : 0);
     }
   }
 
   return {
-    importance: 1,
+    importance: Math.min(maxImportance, 1),
     user: Math.min(maxUser, 10),
     date: Math.min(maxDate, 10),
+    file: Math.min(maxFile, 20),
     comment: Math.min(maxComment, 50),
   };
 }
 
-function formatTableRow(importance, user, date, comment, widths) {
-  const importanceFormatted = importance.padEnd(widths.importance).slice(0, widths.importance);
-  const userFormatted = user.slice(0, widths.user).padEnd(widths.user);
-  const dateFormatted = date.slice(0, widths.date).padEnd(widths.date);
-  let commentFormatted = comment.slice(0, widths.comment);
-  
+function formatTableRow(importance, user, date, file, comment, widths) {
+  const importanceFormatted = importance
+    .padEnd(widths.importance)
+    .slice(0, widths.importance);
+
+  let userFormatted = user.slice(0, widths.user);
+  userFormatted = userFormatted.padEnd(widths.user);
+
+  let dateFormatted = date.slice(0, widths.date);
+  dateFormatted = dateFormatted.padEnd(widths.date);
+
+  let fileFormatted = file.slice(0, widths.file);
+  fileFormatted = fileFormatted.padEnd(widths.file);
+
+  let commentSlice = comment.slice(0, widths.comment);
   if (comment.length > widths.comment) {
-    commentFormatted = commentFormatted.slice(0, widths.comment - 3) + "...";
+    commentSlice = commentSlice.slice(0, widths.comment - 3) + "...";
   }
-  commentFormatted = commentFormatted.padEnd(widths.comment);
-  
-  return `  ${importanceFormatted}  |  ${userFormatted}  |  ${dateFormatted}  |  ${commentFormatted}`;
+  const commentFormatted = commentSlice.padEnd(widths.comment);
+
+  return `  ${importanceFormatted}  |  ${userFormatted}  |  ${dateFormatted}  |  ${fileFormatted}  |  ${commentFormatted}`;
 }
 
 function getHeader(widths) {
-  return formatTableRow("!", "user", "date", "comment", widths);
+  return formatTableRow("!", "user", "date", "file", "comment", widths);
 }
 
 function getSeparator(widths) {
-  const totalLength = 
-    2 + widths.importance + 2 + 3 + 
-    2 + widths.user + 2 + 3 +
-    2 + widths.date + 2 + 3 +
-    2 + widths.comment + 2;
+  const totalLength =
+    2 +
+    widths.importance +
+    2 +
+    3 +
+    (2 + widths.user + 2 + 3) +
+    (2 + widths.date + 2 + 3) +
+    (2 + widths.file + 2 + 3) +
+    (2 + widths.comment + 2);
   return "-".repeat(totalLength);
 }
 
+function printTodos(todoObjects) {
+  if (todoObjects.length === 0) {
+    return;
+  }
 
-function printTodos(todos) {
-  if (todos.length === 0) return;
-  const widths = calculateColumnWidths(todos);
-  
+  const parsed = todoObjects.map((obj) => {
+    const parsedObj = checkRe(obj);
+    if (parsedObj) {
+      return parsedObj;
+    } else {
+      return {
+        author: "",
+        date: "",
+        comment: obj.raw.replace("// TODO", "").trim(),
+        raw: obj.raw,
+        file: obj.fileName,
+      };
+    }
+  });
+
+  const widths = calculateColumnWidths(parsed);
+
   console.log(getHeader(widths));
   console.log(getSeparator(widths));
-  
-  for (const todo of todos) {
-    const parsedTodo = checkRe(todo);
-    if (parsedTodo) {
-      const importance = parsedTodo.raw.includes("!") ? "!" : " ";
-      console.log(formatTableRow(
+
+  for (const p of parsed) {
+    const importance = p.raw.includes("!") ? "!" : " ";
+    console.log(
+      formatTableRow(
         importance,
-        parsedTodo.author,
-        parsedTodo.date,
-        parsedTodo.comment,
+        p.author || "",
+        p.date || "",
+        p.file || "",
+        p.comment || "",
         widths
-      ));
-    }
+      )
+    );
   }
-  
+
   console.log(getSeparator(widths));
 }
 
+function parseDate(dateStr) {
+  const parts = dateStr.split("-");
+  const year = parseInt(parts[0], 10);
+  const month = parts[1] ? parseInt(parts[1], 10) - 1 : 0;
+  const day = parts[2] ? parseInt(parts[2], 10) : 1;
+  return new Date(year, month, day);
+}
+
 function processCommand(command) {
-  const splitedCommand = command.split(' ');
-  switch (splitedCommand[0]) {
-    case "important":
-      const importantTodos = getTodos().filter((x) => x.includes("!"));
-      printTodos(importantTodos);
-      break;
+  const splitedCommand = command.trim().split(" ");
+  const cmd = splitedCommand[0];
+  switch (cmd) {
     case "exit":
       process.exit(0);
       break;
-    case "show":
+
+    case "show": {
       const todos = getTodos();
       printTodos(todos);
       break;
-    case "user":
-      const reTodos = getTodos().map(checkRe);
-      const userTodos = reTodos.filter((todo) => todo && todo.author.toLowerCase() === splitedCommand[1].toLowerCase());
-      printTodos(userTodos.map((todo) => todo.raw));
+    }
+
+    case "important": {
+      const todos = getTodos().filter((t) => t.raw.includes("!"));
+      printTodos(todos);
       break;
-    case "date":
-      if (splitedCommand.length < 2) {
-        console.log("Wrong command format. Use: date {yyyy[-mm[-dd]]}");
+    }
+
+    case "user": {
+      const userName = splitedCommand[1];
+      if (!userName) {
+        console.log("Не указан пользователь. Пример: user Veronika");
         break;
       }
-      const dateStr = splitedCommand[1];
-      const targetDate = parseDate(dateStr);
-      const reTodosForDate = getTodos().map(checkRe);
-      const filteredTodos = reTodosForDate.filter((todo) => {
-        if (todo) {
-          const todoDate = parseDate(todo.date);
-          return todoDate > targetDate;
+      const todos = getTodos();
+      const parsed = todos.map((obj) => {
+        const parsedObj = checkRe(obj);
+        if (parsedObj) {
+          return parsedObj;
+        } else {
+          return {
+            author: "",
+            date: "",
+            comment: obj.raw.replace("// TODO", "").trim(),
+            raw: obj.raw,
+            file: obj.fileName,
+          };
         }
-        return false;
       });
-      printTodos(filteredTodos.map((todo) => todo.raw));
+      const filtered = parsed.filter(
+        (p) => p.author.toLowerCase() === userName.toLowerCase()
+      );
+      printTodos(filtered);
       break;
+    }
+
+    case "sort": {
+      const arg = splitedCommand[1];
+      if (!arg) {
+        console.log("Не указан критерий сортировки. Пример: sort user");
+        break;
+      }
+      switch (arg) {
+        case "importance": {
+          const todos = getTodos();
+          todos.sort(
+            (a, b) => b.raw.split("!").length - a.raw.split("!").length
+          );
+          printTodos(todos);
+          break;
+        }
+
+        case "user": {
+          const todos = getTodos();
+          const parsed = todos.map((obj) => {
+            const parsedObj = checkRe(obj);
+            if (parsedObj) {
+              return parsedObj;
+            } else {
+              return {
+                author: "",
+                date: "",
+                comment: obj.raw.replace("// TODO", "").trim(),
+                raw: obj.raw,
+                file: obj.fileName,
+              };
+            }
+          });
+          parsed.sort((a, b) => {
+            if (a.author.toLowerCase() < b.author.toLowerCase()) return -1;
+            if (a.author.toLowerCase() > b.author.toLowerCase()) return 1;
+            return 0;
+          });
+          const withAuthor = parsed.filter((x) => x.author !== "");
+          const withoutAuthor = parsed.filter((x) => x.author === "");
+          const result = [...withAuthor, ...withoutAuthor];
+          printTodos(result);
+          break;
+        }
+
+        case "date": {
+          const todos = getTodos();
+          const parsed = todos.map((obj) => {
+            const parsedObj = checkRe(obj);
+            if (parsedObj) {
+              const d = parseDate(parsedObj.date);
+              return {
+                ...parsedObj,
+                dateObj: isNaN(d.getTime()) ? null : d,
+              };
+            } else {
+              return {
+                author: "",
+                date: "",
+                comment: obj.raw.replace("// TODO", "").trim(),
+                raw: obj.raw,
+                file: obj.fileName,
+                dateObj: null,
+              };
+            }
+          });
+          parsed.sort((a, b) => {
+            if (b.dateObj && a.dateObj) {
+              return b.dateObj - a.dateObj;
+            } else if (b.dateObj && !a.dateObj) {
+              return 1;
+            } else if (!b.dateObj && a.dateObj) {
+              return -1;
+            } else {
+              return 0;
+            }
+          });
+          printTodos(parsed);
+          break;
+        }
+
+        default:
+          console.log("Неверный аргумент сортировки");
+          break;
+      }
+      break;
+    }
+
+    case "date": {
+      const dateStr = splitedCommand[1];
+      if (!dateStr) {
+        console.log("Не указана дата. Пример: date 2018-03-02");
+        break;
+      }
+      const afterDate = parseDate(dateStr);
+      if (isNaN(afterDate.getTime())) {
+        console.log("Некорректный формат даты.");
+        break;
+      }
+      const todos = getTodos();
+      const parsed = todos.map((obj) => {
+        const parsedObj = checkRe(obj);
+        if (parsedObj) {
+          return {
+            ...parsedObj,
+            file: obj.fileName,
+          };
+        } else {
+          return {
+            author: "",
+            date: "",
+            comment: obj.raw.replace("// TODO", "").trim(),
+            raw: obj.raw,
+            file: obj.fileName,
+          };
+        }
+      });
+      const filtered = parsed.filter((t) => {
+        if (!t.date) return false;
+        const d = parseDate(t.date);
+        if (isNaN(d.getTime())) return false;
+        return d > afterDate;
+      });
+      printTodos(filtered);
+      break;
+    }
+
     default:
       console.log("wrong command");
       break;
   }
 }
-
-function parseDate(dateStr) {
-  const parts = dateStr.split("-");
-  const year = parseInt(parts[0]);
-  const month = parts[1] ? parseInt(parts[1]) - 1 : 0; // Месяцы в JavaScript начинаются с 0
-  const day = parts[2] ? parseInt(parts[2]) : 1;
-  return new Date(year, month, day);
-}
-
-// TODO you can do it
