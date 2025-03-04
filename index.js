@@ -41,6 +41,12 @@ function getTodos() {
 
 function processCommand(command) {
   switch (command) {
+    case "important":
+      const importantTodos = getTodos().filter((x) => x.includes("!"));
+      for (const todo of importantTodos) {
+        console.log(todo);
+      }
+      break;
     case "exit":
       process.exit(0);
       break;
